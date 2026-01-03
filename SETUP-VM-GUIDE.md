@@ -213,8 +213,38 @@ java -version
 ```
 
 ## Bước 12: Cấu hình mạng máy ảo
-### VirtualBox:
-- Settings → Network → Adapter 1 → NAT
+
+### Lựa chọn 1: Bridge Mode (Khuyến nghị - Không cần port forwarding)
+
+Khi dùng **Bridge mode**, VM sẽ có IP trực tiếp trên mạng LAN như một máy thật. **KHÔNG CẦN** cấu hình port forwarding.
+
+#### VirtualBox:
+- Settings → Network → Adapter 1 → **Bridged Adapter**
+- Chọn tên card mạng của host (thường là Ethernet hoặc Wi-Fi)
+- VM sẽ tự động nhận IP từ router DHCP
+
+#### VMware:
+- Network Adapter → **Bridged**
+- Chọn card mạng tương ứng
+- VM sẽ tự động nhận IP từ router DHCP
+
+**Lưu ý khi dùng Bridge:**
+- VM có thể truy cập trực tiếp từ host hoặc các máy khác trên mạng
+- Đảm bảo firewall trên VM cho phép các port cần thiết:
+  ```bash
+  sudo ufw allow 8080/tcp  # API Gateway, Jenkins
+  sudo ufw allow 8761/tcp  # Eureka
+  sudo ufw allow 8888/tcp  # Config Server
+  sudo ufw allow 9000/tcp  # SonarQube
+  sudo ufw allow 20001/tcp # Kiali
+  ```
+
+### Lựa chọn 2: NAT Mode (Cần port forwarding)
+
+Nếu dùng **NAT mode**, bạn cần cấu hình port forwarding để truy cập các service từ host.
+
+#### VirtualBox:
+- Settings → Network → Adapter 1 → **NAT**
 - Advanced → Port Forwarding:
   - 8080 → 8080 (API Gateway)
   - 8761 → 8761 (Eureka)
@@ -223,9 +253,10 @@ java -version
   - 8080 → 8080 (Jenkins)
   - 20001 → 20001 (Kiali)
 
-### VMware:
-- Network Adapter → NAT
-- Tương tự port forwarding
+#### VMware:
+- Network Adapter → **NAT**
+- Settings → Network Adapter → NAT Settings → Port Forwarding
+- Thêm các port tương tự như trên
 
 ## Kiểm tra
 ```bash
@@ -249,41 +280,6 @@ docker ps | grep sonarqube
 - Tạo snapshot sau mỗi bước quan trọng
 - Backup cấu hình quan trọng
 - Đảm bảo máy ảo có đủ tài nguyên
-
-## Xử lý Lỗi npm Permissions (EACCES)
-
-Nếu gặp lỗi `EACCES: permission denied` khi cài npm packages globally:
-
-### Giải pháp 1: Sửa quyền npm (Khuyến nghị)
-```bash
-# Tạo thư mục global cho npm
-mkdir ~/.npm-global
-
-# Cấu hình npm sử dụng thư mục này
-npm config set prefix '~/.npm-global'
-
-# Thêm vào PATH (thêm vào ~/.bashrc hoặc ~/.profile)
-echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
-
-# Bây giờ có thể cài packages global không cần sudo
-npm install -g snyk
-```
-
-### Giải pháp 2: Dùng sudo (Không khuyến nghị)
-```bash
-sudo npm install -g snyk
-```
-
-### Giải pháp 3: Sửa quyền thư mục npm hiện tại
-```bash
-# Sửa quyền sở hữu thư mục npm
-sudo chown -R $(whoami) $(npm config get prefix)/{lib/node_modules,bin,share}
-```
-
-**Lưu ý**: Với Snyk, nên dùng script cài đặt chính thức: `curl -sL https://snyk.io/get-cli.sh | sh`
-
----
 
 ## Mở rộng Disk Space cho VM (Extend Filesystem)
 
