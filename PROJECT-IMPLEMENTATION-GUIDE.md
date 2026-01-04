@@ -555,8 +555,10 @@ kubectl port-forward -n petclinic svc/api-gateway 8080:8080
 
 ## Bước 3: Cấu hình mTLS (Mutual TLS)
 
+**Lưu ý**: Đảm bảo bạn đang ở trong thư mục `k8s-manifests` (không cần `cd ~`). Các file mTLS config sẽ được tạo cùng thư mục với deployment manifests.
+
 ### 3.1. Tạo PeerAuthentication Policy (Enable mTLS cho toàn namespace)
-Tạo file `mtls-peer-authentication.yaml`:
+Tạo file `mtls-peer-authentication.yaml` trong thư mục `k8s-manifests`:
 ```yaml
 apiVersion: security.istio.io/v1beta1
 kind: PeerAuthentication
@@ -569,7 +571,7 @@ spec:
 ```
 
 ### 3.2. Tạo DestinationRule (Định nghĩa mTLS cho destinations)
-Tạo file `mtls-destination-rule.yaml`:
+Tạo file `mtls-destination-rule.yaml` trong thư mục `k8s-manifests`:
 ```yaml
 apiVersion: networking.istio.io/v1beta1
 kind: DestinationRule
@@ -609,8 +611,10 @@ kubectl logs -n petclinic $POD_NAME -c istio-proxy | grep -i tls
 
 ## Bước 4: Cấu hình Authorization Policy
 
+**Lưu ý**: Tiếp tục làm việc trong thư mục `k8s-manifests`.
+
 ### 4.1. Tạo Authorization Policy (Chỉ cho phép một số service giao tiếp)
-Tạo file `authorization-policy.yaml`:
+Tạo file `authorization-policy.yaml` trong thư mục `k8s-manifests`:
 ```yaml
 apiVersion: security.istio.io/v1beta1
 kind: AuthorizationPolicy
@@ -706,8 +710,10 @@ kubectl run test-pod --image=curlimages/curl -n petclinic --rm -it --restart=Nev
 
 ## Bước 5: Cấu hình Retry Policy
 
+**Lưu ý**: Tiếp tục làm việc trong thư mục `k8s-manifests`.
+
 ### 5.1. Tạo VirtualService với Retry Policy
-Tạo file `retry-policy.yaml`:
+Tạo file `retry-policy.yaml` trong thư mục `k8s-manifests`:
 ```yaml
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
@@ -777,7 +783,7 @@ kubectl get virtualservice -n petclinic
 ```
 
 ### 5.3. Test Retry Policy (Tạo service trả về 500 để test)
-Tạo file `test-error-service.yaml`:
+Tạo file `test-error-service.yaml` trong thư mục `k8s-manifests`:
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -821,7 +827,7 @@ spec:
     targetPort: 8080
 ```
 
-Tạo VirtualService cho test service:
+Tạo VirtualService cho test service trong thư mục `k8s-manifests` (file `test-error-service-retry.yaml`):
 ```yaml
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
