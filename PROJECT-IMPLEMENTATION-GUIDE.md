@@ -132,10 +132,25 @@ kubectl port-forward --address 0.0.0.0 -n istio-system svc/kiali 20001:20001
 ## Bước 2: Build và Deploy Spring PetClinic Microservices
 
 ### 2.1. Clone và build project
+
+**Lưu ý**: 
+- Nếu bạn đã có repo trong workspace hiện tại, bỏ qua bước clone và chuyển thẳng sang build
+- Nếu bạn có fork/custom repo với các thay đổi riêng, clone từ repo của bạn
+- Nếu bắt đầu từ đầu, clone từ repo gốc
+
 ```bash
+# Option 1: Clone từ repo gốc (nếu chưa có code)
 cd ~
 git clone https://github.com/spring-petclinic/spring-petclinic-microservices.git
 cd spring-petclinic-microservices
+
+# Option 2: Clone từ fork/custom repo của bạn (nếu có thay đổi riêng)
+# cd ~
+# git clone https://github.com/<your-username>/spring-petclinic-microservices.git
+# cd spring-petclinic-microservices
+
+# Option 3: Nếu đã có repo trong workspace, chỉ cần cd vào thư mục
+# cd /path/to/spring-petclinic-microservices
 
 # Build project
 ./mvnw clean install -DskipTests
@@ -152,8 +167,11 @@ cd spring-petclinic-microservices
 
 ### 2.3. Tạo Kubernetes manifests
 
-Tạo thư mục cho manifests:
+**Lưu ý**: Đảm bảo bạn đang ở trong thư mục root của project `spring-petclinic-microservices` (không cần `cd ~`).
+
+Tạo thư mục cho manifests trong project root:
 ```bash
+# Tạo thư mục k8s-manifests trong project root
 mkdir -p k8s-manifests
 cd k8s-manifests
 ```
@@ -390,14 +408,55 @@ kind: Service
 metadata:
   name: api-gateway
   namespace: petclinic
-  type: LoadBalancer  # Hoặc NodePort nếu không có LoadBalancer
 spec:
+  type: LoadBalancer  # Hoặc NodePort nếu không có LoadBalancer (xem Option 2 bên dưới)
   selector:
     app: api-gateway
   ports:
   - port: 8080
     targetPort: 8080
-    nodePort: 30080  # Nếu dùng NodePort
+```
+
+**Lưu ý về Service Type:**
+
+**Hiểu về Port trong Kubernetes:**
+- **`port`**: Port của Service trong cluster network (dùng để giao tiếp giữa các service trong cluster)
+- **`targetPort`**: Port của container/pod (thường giống với port của ứng dụng)
+- **`nodePort`**: Port trên node để expose service ra ngoài cluster (chỉ dùng với NodePort type, range: 30000-32767)
+- **Port trong cluster KHÔNG conflict với port trên host machine** vì chúng ở các network namespace khác nhau
+
+**Option 1: LoadBalancer** (dùng nếu cluster hỗ trợ LoadBalancer - ví dụ: cloud provider, MetalLB)
+```yaml
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-gateway
+  ports:
+  - port: 8080
+    targetPort: 8080
+```
+
+**Option 2: NodePort** (dùng nếu không có LoadBalancer - ví dụ: local cluster, minikube, kind)
+```yaml
+spec:
+  type: NodePort
+  selector:
+    app: api-gateway
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30080  # Port trên node (30000-32767)
+```
+
+**Option 3: ClusterIP** (chỉ truy cập trong cluster, dùng với Ingress)
+```yaml
+spec:
+  type: ClusterIP  # Mặc định, có thể bỏ qua
+  selector:
+    app: api-gateway
+  ports:
+  - port: 8080
+    targetPort: 8080
 ```
 
 ### 2.4. Deploy tất cả services
@@ -424,14 +483,73 @@ kubectl get svc -n petclinic
 ```
 
 ### 2.5. Verify deployment
+
+**Kiểm tra Pods:**
 ```bash
 # Check pods có sidecar (istio-proxy)
 kubectl get pods -n petclinic
-# Mỗi pod phải có 2 containers: app container và istio-proxy
+# Mỗi pod phải có READY 2/2: app container + istio-proxy sidecar
+# Tất cả pods phải có STATUS Running
 
-# Check logs
-kubectl logs -n petclinic -l app=api-gateway -c istio-proxy
+# Kiểm tra chi tiết containers trong pod
+# Cách 1: Xem tên các containers
+kubectl get pod <pod-name> -n petclinic -o jsonpath='{.spec.containers[*].name}'
+# Kết quả mong đợi: api-gateway istio-proxy (hoặc <app-name> istio-proxy)
+
+# Cách 2: Xem đầy đủ thông tin containers (không dùng grep để thấy cả 2 containers)
+kubectl describe pod <pod-name> -n petclinic | grep -A 50 "Containers:"
+# Hoặc xem toàn bộ output
+kubectl describe pod <pod-name> -n petclinic
+
+# Cách 3: Kiểm tra trạng thái từng container
+kubectl get pod <pod-name> -n petclinic -o jsonpath='{range .status.containerStatuses[*]}{.name}{": "}{.ready}{"\n"}{end}'
+# Kết quả mong đợi:
+# api-gateway: true
+# istio-proxy: true
+
+# Lưu ý: Init Container "istio-init" là bình thường, nó chạy trước để setup iptables
 ```
+
+**Kiểm tra Services:**
+```bash
+# Check services đã được tạo
+kubectl get svc -n petclinic
+# Phải có các services: api-gateway, config-server, discovery-server, 
+# customers-service, vets-service, visits-service
+
+# Kiểm tra service endpoints
+kubectl get endpoints -n petclinic
+# Mỗi service phải có endpoints (pods đang chạy)
+```
+
+**Kiểm tra Logs:**
+```bash
+# Check logs của app container
+kubectl logs -n petclinic -l app=api-gateway --tail=50
+
+# Check logs của istio-proxy sidecar
+kubectl logs -n petclinic -l app=api-gateway -c istio-proxy --tail=50
+
+# Check logs của các services khác
+kubectl logs -n petclinic -l app=config-server --tail=20
+kubectl logs -n petclinic -l app=discovery-server --tail=20
+```
+
+**Kiểm tra Application Health:**
+```bash
+# Test API Gateway từ trong cluster
+kubectl exec -n petclinic <api-gateway-pod-name> -c istio-proxy -- curl -s http://localhost:8080/actuator/health
+
+# Hoặc port-forward để test từ localhost
+kubectl port-forward -n petclinic svc/api-gateway 8080:8080
+# Sau đó test: curl http://localhost:8080/actuator/health
+```
+
+**Kết quả mong đợi:**
+- ✅ Tất cả pods: `READY 2/2`, `STATUS Running`
+- ✅ Tất cả services: `TYPE ClusterIP` (hoặc LoadBalancer/NodePort cho api-gateway)
+- ✅ Endpoints: Mỗi service có endpoints tương ứng với pods
+- ✅ Logs: Không có lỗi nghiêm trọng, ứng dụng khởi động thành công
 
 ---
 
@@ -1407,6 +1525,22 @@ Tạo file `README-DEVSECOPS.md` với:
 - **Pods không có sidecar**: Check namespace label `istio-injection=enabled`
 - **mTLS không hoạt động**: Verify PeerAuthentication và DestinationRule
 - **Authorization bị chặn**: Check service account và principal names
+- **Lỗi "unknown field metadata.type" khi apply Service**: 
+  - **Nguyên nhân**: Field `type` bị đặt sai vị trí trong `metadata` thay vì `spec`
+  - **Giải pháp**: Di chuyển `type: LoadBalancer/NodePort` vào trong `spec`, không phải `metadata`
+  - **Ví dụ sai**:
+    ```yaml
+    metadata:
+      name: api-gateway
+      type: LoadBalancer  # ❌ SAI - không được đặt ở đây
+    ```
+  - **Ví dụ đúng**:
+    ```yaml
+    metadata:
+      name: api-gateway
+    spec:
+      type: LoadBalancer  # ✅ ĐÚNG - phải đặt trong spec
+    ```
 
 ### DevSecOps Issues:
 - **SonarQube connection failed**: Check token và URL
