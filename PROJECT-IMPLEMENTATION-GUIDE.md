@@ -113,13 +113,18 @@ kubectl get secrets -n istio-system | grep kiali
 
 ### 1.5. Expose Kiali (Port Forward)
 ```bash
-# Port forward Kiali để truy cập từ localhost
-kubectl port-forward -n istio-system svc/kiali 20001:20001
+# Port forward Kiali service để truy cập từ localhost hoặc máy khác trong mạng
+# --address 0.0.0.0 cho phép truy cập từ bất kỳ địa chỉ IP nào (không chỉ localhost)
+kubectl port-forward --address 0.0.0.0 -n istio-system svc/kiali 20001:20001
 
-# Truy cập: http://localhost:20001
-# Nếu strategy là "anonymous": Không cần đăng nhập, truy cập trực tiếp
-# Nếu strategy là "login": Đăng nhập với username/password (thử admin/admin)
-# Nếu strategy là "token": Cần token để đăng nhập
+# Sau khi chạy lệnh trên, truy cập Kiali tại: http://localhost:20001
+# Hoặc từ máy khác trong cùng mạng: http://<IP-của-máy-này>:20001
+
+# Lưu ý về Authentication:
+# - Kiểm tra authentication strategy bằng lệnh ở Bước 1.4
+# - Nếu strategy là "anonymous": Không cần đăng nhập, truy cập trực tiếp
+# - Nếu strategy là "login": Đăng nhập với username/password (mặc định: admin/admin)
+# - Nếu strategy là "token": Cần token để đăng nhập (lấy từ secret hoặc config)
 ```
 
 ---
