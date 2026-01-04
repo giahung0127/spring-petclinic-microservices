@@ -596,22 +596,135 @@ kubectl get destinationrule -n petclinic
 ```
 
 ### 3.4. Test mTLS
+
+**Kiểm tra mTLS đã được apply:**
+```bash
+# Verify PeerAuthentication
+kubectl get peerauthentication -n petclinic
+
+# Verify DestinationRule
+kubectl get destinationrule -n petclinic
+
+# Xem chi tiết
+kubectl describe peerauthentication default -n petclinic
+kubectl describe destinationrule default -n petclinic
+```
+
+**Test mTLS connection:**
 ```bash
 # Get a pod name
 POD_NAME=$(kubectl get pod -n petclinic -l app=customers-service -o jsonpath='{.items[0].metadata.name}')
 
-# Test connection với mTLS (sẽ thành công)
+# Test connection với mTLS
 kubectl exec -n petclinic $POD_NAME -c istio-proxy -- curl -v http://vets-service.petclinic.svc.cluster.local:8083/vets
 
+# Lưu ý: Nếu thấy "Connection reset by peer" hoặc lỗi, có thể do:
+# 1. mTLS đang được enforce nhưng service chưa sẵn sàng
+# 2. Authorization Policy chưa được apply (sẽ apply ở Bước 4)
+# 3. Kiểm tra logs để xem chi tiết
+
 # Kiểm tra TLS trong logs
-kubectl logs -n petclinic $POD_NAME -c istio-proxy | grep -i tls
+kubectl logs -n petclinic $POD_NAME -c istio-proxy --tail=50 | grep -i tls
+
+# Kiểm tra logs của vets-service để xem có nhận được request không
+VETS_POD=$(kubectl get pod -n petclinic -l app=vets-service -o jsonpath='{.items[0].metadata.name}')
+kubectl logs -n petclinic $VETS_POD -c istio-proxy --tail=50 | grep -i tls
 ```
+
+**Kiểm tra mTLS status trong Kiali (sau Bước 6):**
+- Vào Kiali UI → Graph → Chọn namespace `petclinic`
+- Xem Security badge: các service phải có màu xanh (mTLS enabled)
 
 ---
 
 ## Bước 4: Cấu hình Authorization Policy
 
 **Lưu ý**: Tiếp tục làm việc trong thư mục `k8s-manifests`.
+
+### 4.0. Tạo Service Accounts (QUAN TRỌNG)
+
+**Vấn đề**: Authorization Policy sử dụng service account principals để xác định nguồn request. Nếu pods không có service account được chỉ định, chúng sẽ dùng service account `default`, và Authorization Policy sẽ không match.
+
+**Giải pháp**: Tạo service accounts và cập nhật deployments để sử dụng chúng.
+
+**⚠️ QUAN TRỌNG**: Phải tạo service accounts TRƯỚC khi apply deployments với `serviceAccountName`. Nếu không, pods sẽ bị Pending vì không tìm thấy service account.
+
+Tạo file `service-accounts.yaml` trong thư mục `k8s-manifests`:
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-gateway
+  namespace: petclinic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: customers-service
+  namespace: petclinic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vets-service
+  namespace: petclinic
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: visits-service
+  namespace: petclinic
+```
+
+**Thứ tự thực hiện (QUAN TRỌNG):**
+
+1. **Bước 1**: Tạo service accounts TRƯỚC:
+```bash
+kubectl apply -f service-accounts.yaml
+
+# Verify service accounts đã được tạo
+kubectl get serviceaccounts -n petclinic
+# Phải thấy: api-gateway, customers-service, vets-service, visits-service
+```
+
+2. **Bước 2**: Sau đó mới cập nhật và apply deployments với `serviceAccountName`
+
+**Cập nhật deployments để sử dụng service accounts:**
+
+Cập nhật file `api-gateway-deployment.yaml`, thêm `serviceAccountName` vào `spec.template.spec`:
+```yaml
+spec:
+  template:
+    spec:
+      serviceAccountName: api-gateway  # Thêm dòng này
+      containers:
+      - name: api-gateway
+        ...
+```
+
+Tương tự, cập nhật các deployment files khác:
+- `customers-service-deployment.yaml`: `serviceAccountName: customers-service`
+- `vets-service-deployment.yaml`: `serviceAccountName: vets-service`
+- `visits-service-deployment.yaml`: `serviceAccountName: visits-service`
+
+**Apply lại deployments:**
+```bash
+kubectl apply -f api-gateway-deployment.yaml
+kubectl apply -f customers-service-deployment.yaml
+kubectl apply -f vets-service-deployment.yaml
+kubectl apply -f visits-service-deployment.yaml
+
+# Đợi pods restart với service account mới
+kubectl get pods -n petclinic -w
+```
+
+**Lưu ý**: Nếu bạn đã apply Authorization Policy trước khi tạo service accounts, bạn có 2 lựa chọn:
+1. **Khuyến nghị**: Tạo service accounts và cập nhật deployments (như trên)
+2. **Quick fix (ít bảo mật hơn)**: Cập nhật Authorization Policy để dùng service account `default`:
+   ```yaml
+   principals: ["cluster.local/ns/petclinic/sa/default"]
+   ```
+   Sau đó apply lại: `kubectl apply -f authorization-policy.yaml`
 
 ### 4.1. Tạo Authorization Policy (Chỉ cho phép một số service giao tiếp)
 Tạo file `authorization-policy.yaml` trong thư mục `k8s-manifests`:
@@ -1531,6 +1644,67 @@ Tạo file `README-DEVSECOPS.md` với:
 - **Pods không có sidecar**: Check namespace label `istio-injection=enabled`
 - **mTLS không hoạt động**: Verify PeerAuthentication và DestinationRule
 - **Authorization bị chặn**: Check service account và principal names
+- **Pods bị Pending sau khi cập nhật deployment với serviceAccountName**:
+  - **Nguyên nhân**: Service account chưa được tạo hoặc không tồn tại
+  - **Kiểm tra**:
+    ```bash
+    # Xem chi tiết pod để biết lý do Pending
+    kubectl describe pod <pod-name> -n petclinic
+    
+    # Kiểm tra service accounts đã được tạo chưa
+    kubectl get serviceaccounts -n petclinic
+    
+    # Xem events để biết lỗi cụ thể
+    kubectl get events -n petclinic --sort-by='.lastTimestamp' | tail -20
+    ```
+  - **Giải pháp**:
+    1. Tạo service accounts trước khi apply deployments:
+       ```bash
+       kubectl apply -f service-accounts.yaml
+       ```
+    2. Verify service accounts đã được tạo:
+       ```bash
+       kubectl get serviceaccounts -n petclinic
+       # Phải thấy: api-gateway, customers-service, vets-service, visits-service
+       ```
+    3. Nếu service accounts đã có nhưng pods vẫn Pending, xóa pods cũ để tạo lại:
+       ```bash
+       kubectl delete pod <pending-pod-name> -n petclinic
+       ```
+    4. Hoặc scale down rồi scale up lại:
+       ```bash
+       kubectl scale deployment <deployment-name> --replicas=0 -n petclinic
+       kubectl scale deployment <deployment-name> --replicas=2 -n petclinic
+       ```
+- **Authorization Policy không hoạt động - "Connection reset by peer" sau khi apply**:
+  - **Nguyên nhân**: Pods đang sử dụng service account `default` nhưng Authorization Policy đang kiểm tra service account khác (ví dụ: `api-gateway`)
+  - **Kiểm tra**:
+    ```bash
+    # Xem service account của pod
+    kubectl get pod <pod-name> -n petclinic -o jsonpath='{.spec.serviceAccountName}'
+    
+    # Xem service account trong Authorization Policy
+    kubectl get authorizationpolicy <policy-name> -n petclinic -o yaml | grep principals
+    ```
+  - **Giải pháp**:
+    1. Tạo service accounts (xem Bước 4.0)
+    2. Cập nhật deployments với `serviceAccountName`
+    3. Apply lại deployments và đợi pods restart
+    4. Hoặc cập nhật Authorization Policy để dùng `default` service account (ít bảo mật hơn):
+       ```yaml
+       principals: ["cluster.local/ns/petclinic/sa/default"]
+       ```
+- **Lỗi "Connection reset by peer" khi test mTLS**:
+  - **Nguyên nhân**: Có thể do mTLS STRICT mode đã enable nhưng:
+    1. Service chưa sẵn sàng hoàn toàn
+    2. Authorization Policy chưa được apply (sẽ apply ở Bước 4)
+    3. Certificate chưa được issue đúng cách
+  - **Giải pháp**:
+    1. Kiểm tra PeerAuthentication và DestinationRule đã apply: `kubectl get peerauthentication,destinationrule -n petclinic`
+    2. Kiểm tra logs của istio-proxy: `kubectl logs <pod-name> -c istio-proxy -n petclinic | grep -i tls`
+    3. Đợi vài giây sau khi apply mTLS để certificates được issue
+    4. Test từ api-gateway thay vì customers-service (sau khi apply Authorization Policy ở Bước 4)
+    5. Kiểm tra mTLS status trong Kiali (sau Bước 6)
 - **Lỗi "unknown field metadata.type" khi apply Service**: 
   - **Nguyên nhân**: Field `type` bị đặt sai vị trí trong `metadata` thay vì `spec`
   - **Giải pháp**: Di chuyển `type: LoadBalancer/NodePort` vào trong `spec`, không phải `metadata`
