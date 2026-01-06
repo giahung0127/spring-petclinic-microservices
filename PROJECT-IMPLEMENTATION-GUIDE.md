@@ -278,7 +278,7 @@ spec:
       - name: customers-service
         image: springcommunity/spring-petclinic-customers-service:latest
         ports:
-        - containerPort: 8081
+        - containerPort: 8080
         env:
         - name: SPRING_PROFILES_ACTIVE
           value: "native"
@@ -292,8 +292,8 @@ spec:
   selector:
     app: customers-service
   ports:
-  - port: 8081
-    targetPort: 8081
+  - port: 8080
+    targetPort: 8080
 ```
 
 #### 2.3.4. Vets Service Deployment
@@ -807,7 +807,7 @@ kubectl get authorizationpolicy -n petclinic
 ```bash
 # Test 1: API Gateway -> Customers Service (should succeed)
 GATEWAY_POD=$(kubectl get pod -n petclinic -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n petclinic $GATEWAY_POD -c istio-proxy -- curl -v http://customers-service.petclinic.svc.cluster.local:8081/customers
+kubectl exec -n petclinic $GATEWAY_POD -c api-gateway -- curl -v http://customers-service.petclinic.svc.cluster.local:8080/owners
 
 # Test 2: Customers Service -> Vets Service (should fail - not allowed)
 CUSTOMERS_POD=$(kubectl get pod -n petclinic -l app=customers-service -o jsonpath='{.items[0].metadata.name}')
@@ -815,8 +815,8 @@ kubectl exec -n petclinic $CUSTOMERS_POD -c istio-proxy -- curl -v http://vets-s
 # Expected: 403 Forbidden hoặc connection refused
 
 # Test 3: Direct access từ pod khác (should fail)
-kubectl run test-pod --image=curlimages/curl -n petclinic --rm -it --restart=Never -- curl -v http://customers-service.petclinic.svc.cluster.local:8081/customers
-# Expected: 403 Forbidden
+kubectl run test-pod --image=curlimages/curl -n petclinic --rm -it --restart=Never -- curl -v http://customers-service.petclinic.svc.cluster.local:8080/owners
+# Expected: request thất bại (403 hoặc lỗi TLS) vì không đi qua API Gateway và không có sidecar
 ```
 
 ---
