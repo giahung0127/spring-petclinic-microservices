@@ -18,7 +18,7 @@ spec:
       - name: visits-service
         image: springcommunity/spring-petclinic-visits-service:latest
         ports:
-        - containerPort: 8082
+        - containerPort: 8080
         env:
         - name: SPRING_PROFILES_ACTIVE
           value: "native"
@@ -36,5 +36,5 @@ spec:
   selector:
     app: visits-service
   ports:
-  - port: 8082
-    targetPort: 8082
+  - port: 8080
+    targetPort: 8080

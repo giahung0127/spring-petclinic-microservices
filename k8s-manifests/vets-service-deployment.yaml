@@ -18,7 +18,7 @@ spec:
       - name: vets-service
         image: springcommunity/spring-petclinic-vets-service:latest
         ports:
-        - containerPort: 8083
+        - containerPort: 8080
         env:
         - name: SPRING_PROFILES_ACTIVE
           value: "native"
@@ -36,5 +36,5 @@ spec:
   selector:
     app: vets-service
   ports:
-  - port: 8083
-    targetPort: 8083
+  - port: 8080
+    targetPort: 8080
