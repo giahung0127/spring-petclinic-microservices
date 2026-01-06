@@ -1,52 +1,61 @@
-**Kết luận cuối cùng & cách sửa để chạy được**
-
-- Toàn bộ manifest hiện **đã khớp** README/guide:
-  - `api-gateway`: port 8080.
-  - `customers-service`: app chạy 8080, Service/Endpoints trỏ 8080.
-  - mTLS STRICT + DestinationRule ISTIO_MUTUAL + AuthorizationPolicy ALLOW theo service account.
-- Lý do vẫn bị `connection reset`: mình đang `kubectl exec ... -c istio-proxy` rồi `curl http://customers-service...` trực tiếp từ **container sidecar** trong khi namespace bật **mTLS STRICT**. Traffic này **không đi qua Envoy inbound/outbound path đúng chuẩn**, nên bị phía đích reset.
-
-**Cách sửa lệnh curl (debug) cho đúng**
-
-Thay vì exec vào `istio-proxy`, hãy exec vào **container app** `api-gateway` (Envoy sẽ tự chặn & nâng cấp HTTP → mTLS):
+**Test từ customers-service đến vets-service (bị chặn - đúng như mong đợi)**
 
 ```bash
-GATEWAY_POD=$(kubectl get pod -n petclinic -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-
-kubectl exec -n petclinic $GATEWAY_POD -c api-gateway -- \
-  curl -v http://customers-service.petclinic.svc.cluster.local:8080/owners
+CUSTOMERS_POD=$(kubectl get pod -n petclinic -l app=customers-service -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n petclinic $CUSTOMERS_POD -c istio-proxy -- curl -v http://vets-service.petclinic.svc.cluster.local:8083/vets
 ```
 
-Nếu lệnh này trả về 200 thì toàn bộ config (k8s + Istio) đã đúng; lỗi trước giờ là do **cách mình test từ `istio-proxy` container**, không phải do setting trong project.
+Output:
+```
+* Connected to vets-service.petclinic.svc.cluster.local (10.96.105.26) port 8083
+> GET /vets HTTP/1.1
+...
+* Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+```
 
+**Phân tích**:
+- Connection reset này có thể do:
+  1. **Authorization Policy chặn** (đúng như mong đợi): `customers-service` không được phép gọi `vets-service` theo policy → đây là hành vi đúng.
+  2. **Port không đúng**: Cần kiểm tra xem `vets-service` và `visits-service` có đang dùng port đúng không.
 
-giahung@devops:~/spring-petclinic-microservices$ GATEWAY_POD=$(kubectl get pod -n petclinic -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
-giahung@devops:~/spring-petclinic-microservices$ kubectl exec -n petclinic $GATEWAY_POD -c api-gateway -- \
-  curl -v http://customers-service.petclinic.svc.cluster.local:8080/owners
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0* Host customers-service.petclinic.svc.cluster.local:8080 was resolved.
-* IPv6: (none)
-* IPv4: 10.96.249.90
-*   Trying 10.96.249.90:8080...
-* Connected to customers-service.petclinic.svc.cluster.local (10.96.249.90) port 8080
-> GET /owners HTTP/1.1
-> Host: customers-service.petclinic.svc.cluster.local:8080
-> User-Agent: curl/8.5.0
-> Accept: */*
-> 
-  0     0    0     0    0     0      0      0 --:--:--  0:00:09 --:--:--     0< HTTP/1.1 200 OK
-< content-type: application/json
-< date: Tue, 06 Jan 2026 11:38:45 GMT
-< x-envoy-upstream-service-time: 9434
-< server: envoy
-< transfer-encoding: chunked
-< 
-{ [2 bytes data]
-100     2    0     2    0     0      0      0 --:--:--  0:00:09 --:--:--     0
-* Connection #0 to host customers-service.petclinic.svc.cluster.local left intact
-giahung@devops:~/spring-petclinic-microservices$ 
+---
 
+**Đã thực hiện**:
 
+1. ✅ **Khôi phục `deny-all` policy** vào `k8s-manifests/authorization-policy.yaml`
 
-nè output nè, trả về 200 z là đúng r đúng ko ?
+2. **Kiểm tra port của vets và visits service**:
+
+**Vets Service**:
+- Deployment manifest: `containerPort: 8083`, Service `port/targetPort: 8083`
+- Application.yml: Không có `server.port` → Spring Boot mặc định **8080**
+- **Kết luận**: Có thể cần sửa giống customers-service (8083 → 8080), nhưng cần test trước.
+
+**Visits Service**:
+- Deployment manifest: `containerPort: 8082`, Service `port/targetPort: 8082`
+- Application.yml: Không có `server.port` → Spring Boot mặc định **8080**
+- **Kết luận**: Có thể cần sửa giống customers-service (8082 → 8080), nhưng cần test trước.
+
+**Lệnh kiểm tra port thực tế**:
+
+```bash
+# Test vets-service từ trong pod của chính nó
+VETS_POD=$(kubectl get pod -n petclinic -l app=vets-service -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n petclinic $VETS_POD -c vets-service -- curl -v http://localhost:8083/vets
+kubectl exec -n petclinic $VETS_POD -c vets-service -- curl -v http://localhost:8080/vets
+
+# Test visits-service từ trong pod của chính nó
+VISITS_POD=$(kubectl get pod -n petclinic -l app=visits-service -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n petclinic $VISITS_POD -c visits-service -- curl -v http://localhost:8082/visits
+kubectl exec -n petclinic $VISITS_POD -c visits-service -- curl -v http://localhost:8080/visits
+```
+
+**Lưu ý về lỗi connection reset từ customers-service đến vets-service**:
+- Đây là **hành vi đúng** theo Authorization Policy: `customers-service` không được phép gọi `vets-service` (chỉ `api-gateway` được phép).
+- Để test đúng, nên test từ `api-gateway`:
+  ```bash
+  GATEWAY_POD=$(kubectl get pod -n petclinic -l app=api-gateway -o jsonpath='{.items[0].metadata.name}')
+  kubectl exec -n petclinic $GATEWAY_POD -c api-gateway -- curl -v http://vets-service.petclinic.svc.cluster.local:8083/vets
+  ```
+ 
