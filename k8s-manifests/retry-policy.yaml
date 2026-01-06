@@ -1,0 +1,57 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: customers-service-retry
+  namespace: petclinic
+spec:
+  hosts:
+  - customers-service
+  http:
+  - match:
+    - headers:
+        x-retry:
+          exact: "true"
+    route:
+    - destination:
+        host: customers-service
+      weight: 100
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vets-service-retry
+  namespace: petclinic
+spec:
+  hosts:
+  - vets-service
+  http:
+  - route:
+    - destination:
+        host: vets-service
+      weight: 100
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+      retryOn: 5xx,reset,connect-failure
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: visits-service-retry
+  namespace: petclinic
+spec:
+  hosts:
+  - visits-service
+  http:
+  - route:
+    - destination:
+        host: visits-service
+      weight: 100
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+      retryOn: 5xx,reset,connect-failure
