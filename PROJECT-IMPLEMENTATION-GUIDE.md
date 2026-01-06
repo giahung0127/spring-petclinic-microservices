@@ -1721,6 +1721,23 @@ Tạo file `README-DEVSECOPS.md` với:
     spec:
       type: LoadBalancer  # ✅ ĐÚNG - phải đặt trong spec
     ```
+- **Lỗi "Số lượng pod nhiều hơn ban đầu sau khi redeploy**:
+  - **Giải pháp**: 
+    # Scale xuống 0 rồi scale lại lên số replicas ban đầu
+    kubectl scale deployment api-gateway --replicas=0 -n petclinic
+    kubectl scale deployment customers-service --replicas=0 -n petclinic
+    kubectl scale deployment vets-service --replicas=0 -n petclinic
+    kubectl scale deployment visits-service --replicas=0 -n petclinic
+    kubectl scale deployment config-server --replicas=0 -n petclinic
+    kubectl scale deployment discovery-server --replicas=0 -n petclinic
+
+    # Sau đó scale lại (hoặc apply lại deployment files)
+    kubectl scale deployment api-gateway --replicas=2 -n petclinic
+    kubectl scale deployment customers-service --replicas=2 -n petclinic
+    kubectl scale deployment vets-service --replicas=2 -n petclinic
+    kubectl scale deployment visits-service --replicas=2 -n petclinic
+    kubectl scale deployment config-server --replicas=1 -n petclinic
+    kubectl scale deployment discovery-server --replicas=1 -n petclinic
 
 ### DevSecOps Issues:
 - **SonarQube connection failed**: Check token và URL
