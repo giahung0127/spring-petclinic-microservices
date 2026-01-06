@@ -51,14 +51,3 @@ spec:
     to:
     - operation:
         methods: ["GET", "POST"]
----
-# Deny all other traffic by default
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: deny-all
-  namespace: petclinic
-spec:
-  action: DENY
-  rules:
-  - {}
